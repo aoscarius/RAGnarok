@@ -1,0 +1,611 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebUI RAG Agent</title>
+    <style>
+        /* Color Variables (Final Dark Mode Refinement) */
+        :root {
+            --bg-primary: #131314; 
+            --bg-secondary: #131314; 
+            --text-main: #FFFFFF;
+            --text-secondary: #575757; 
+            --color-ai-msg: #151515; /* AI Message Bubble Background (Updated) */
+            --color-user-msg: #1E1F20; 
+            --color-input-bg: #1E1F20; 
+            --color-input-container: #131314; 
+            --color-send-bg: #FFFFFF; 
+            --color-system: #6AA6FF; 
+            --color-focus: #FFFFFF;
+            --border-color: #333333;
+        }
+
+        /* General and Full-Screen Setup */
+        html, body {
+            height: 100%;
+            margin: 0;
+            padding: 0;
+            font-family: 'Arial', sans-serif;
+            background-color: var(--bg-primary);
+            color: var(--text-main);
+            user-select: none;
+        }
+
+        /* Hide Scrollbar (Cross-Browser) */
+        .chat-area-wrapper {
+            overflow-y: scroll; 
+            -ms-overflow-style: none;  /* IE and Edge */
+            scrollbar-width: none;  /* Firefox */
+            /* Ensure smooth scrolling when appending */
+            scroll-behavior: smooth; 
+        }
+        .chat-area-wrapper::-webkit-scrollbar {
+            display: none; /* Chrome, Safari, Opera */
+        }
+
+        /* Main Container: Full height, centered content */
+        .container {
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            align-items: center; 
+            overflow-y: hidden;
+        }
+        
+        /* 1. Fixed Header */
+        .fixed-header {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            z-index: 10;
+            background-color: var(--bg-secondary);
+            color: var(--text-main); 
+            padding: 15px 20px;
+            cursor: pointer;
+            font-size: 1.2em;
+            font-weight: 600;
+            font-family: 'Courier New', monospace;
+            border-bottom: 0px;
+            text-align: left; 
+            padding-left: 20px; 
+        }
+
+        /* 2. Chat Area: Scrolls, centered, respects header/footer space */
+        .chat-area-wrapper {
+            width: 100%;
+            max-width: 900px;
+            padding-top: 60px; 
+            padding-bottom: 180px; 
+        }
+
+        .chat-area {
+            display: flex;
+            flex-direction: column;
+            padding: 0 20px;
+            gap: 15px; 
+        }
+        
+        /* Message Prefixes Style */
+        .prefix {
+            font-weight: bold;
+            color: var(--color-system); 
+            margin-right: 8px;
+            display: inline-block; 
+        }
+        .you-prefix {
+             color: var(--text-secondary); 
+        }
+        .message-content-text {
+             display: inline;
+        }
+
+        /* Message Rows */
+        .message-row {
+            display: flex;
+            padding: 10px 0;
+            border-bottom: 1px solid transparent; 
+            animation: fadeIn 0.3s ease-out;
+        }
+
+        .message-content-wrapper {
+            max-width: 75%; 
+            display: flex;
+            flex-direction: column;
+            padding: 12px 18px; 
+            border-radius: 18px;
+            position: relative; /* Needed for copy button positioning */
+        }
+        
+        /* AI Message Alignment & Bubble (Left) */
+        .ai-message-row {
+            justify-content: flex-start;
+        }
+        .ai-message-row .message-content-wrapper {
+            background-color: var(--color-ai-msg); /* Updated color */
+            border-bottom-left-radius: 4px; 
+            font-family: 'Courier New', monospace;
+        }
+
+        /* User Message Alignment & Bubble (Right) */
+        .user-message-row {
+            justify-content: flex-end; 
+        }
+        .user-message-row .message-content-wrapper {
+            background-color: var(--color-user-msg);
+            border-bottom-right-radius: 4px; 
+        }
+
+        .message-text {
+            padding: 0;
+            line-height: 1.6;
+            word-wrap: break-word;
+            flex-grow: 1;
+        }
+
+        /* Copy Button Icon Style (Placed inside the content wrapper) */
+        .copy-button {
+            position: absolute;
+            bottom: 5px; /* Adjust vertical position */
+            right: 5px; /* Adjust horizontal position */
+            background: none;
+            border: none;
+            cursor: pointer;
+            padding: 5px;
+            color: var(--text-secondary);
+            transition: color 0.2s, background-color 0.2s;
+            border-radius: 4px;
+            opacity: 0; /* Hidden by default */
+        }
+
+        .ai-message-row:hover .copy-button,
+        .copy-button.active {
+            opacity: 1; /* Show on hover or when actively streaming (for testing) */
+        }
+
+        .copy-button:hover {
+            color: var(--color-focus);
+            background-color: var(--bg-primary); /* Darker background on hover */
+        }
+
+        /* 3. Fixed Footer (Stats + Input + Disclaimer) */
+        .fixed-footer {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            z-index: 5;
+            background-color: var(--bg-primary);
+            padding: 20px 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        
+        .stats-bar {
+            font-size: 0.8em;
+            color: var(--text-secondary);
+            text-align: right;
+            width: 90%;
+            max-width: 800px;
+            padding-bottom: 5px;
+        }
+
+        .input-area {
+            width: 90%;
+            max-width: 800px;
+            background-color: var(--color-input-bg); 
+            border-radius: 25px;
+            display: flex;
+            align-items: center;
+            padding: 8px 15px;
+            border: 1px solid transparent;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.4);
+            transition: border-color 0.3s;
+        }
+        .input-area:focus-within {
+             border-color: var(--color-focus);
+             box-shadow: 0 0 10px rgba(255, 255, 255, 0.1);
+        }
+
+        #question-input {
+            background-color: transparent;
+            color: var(--text-main);
+            border: none;
+            flex-grow: 1;
+            padding: 10px;
+            font-size: 1em;
+            outline: none;
+        }
+        
+        #send-button {
+            background-color: var(--color-send-bg);
+            border: none;
+            border-radius: 50%; 
+            width: 35px;
+            height: 35px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            cursor: pointer;
+            margin-left: 10px;
+            transition: background-color 0.3s;
+        }
+
+        #send-button svg {
+            color: var(--color-input-bg); 
+            transform: rotate(-90deg); 
+        }
+
+        #send-button:disabled { 
+            opacity: 0.4;
+            cursor: not-allowed; 
+        }
+
+        /* Disclaimer Style */
+        .disclaimer {
+            font-size: 0.7em;
+            color: var(--text-secondary);
+            margin-top: 10px;
+            text-align: center;
+            width: 90%;
+            max-width: 800px;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    
+    <div class="fixed-header">
+        {{ ragName }}
+    </div>
+    
+    <div class="chat-area-wrapper" id="chat-area-wrapper">
+        <div class="chat-area" id="chat-area">
+            </div>
+    </div>
+    
+    <div class="fixed-footer">
+        <div class="stats-bar" id="stats-bar">
+            <span>
+                Status: <span id="stat-status" style="color: green;">Idle</span> Perf: <span id="stat-tps">0.00</span> t/s
+            </span>
+            <span>
+                Msgs: <span id="stat-M">0</span> | 
+                Height: <span id="stat-H">0</span> | 
+                Scroll: <span id="stat-S">0</span>
+            </span>
+        </div>
+
+        <div class="input-area">
+            <input type="text" id="question-input" placeholder="Ask a question..." required>
+            <button id="send-button" onclick="sendMessage()" disabled>
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <line x1="12" y1="19" x2="12" y2="5"></line>
+                    <polyline points="5 12 12 5 19 12"></polyline>
+                </svg>
+            </button>
+        </div>
+        
+        <div class="disclaimer">
+            {{ ragName }} is a generative model and may produce inaccuracies. Always verify critical information.
+        </div>
+    </div>
+</div>
+
+<script>
+    const chatArea = document.getElementById('chat-area');
+    const chatAreaWrapper = document.getElementById('chat-area-wrapper');
+    const input = document.getElementById('question-input');
+    const sendButton = document.getElementById('send-button');
+
+    const statsElements = {
+        M: document.getElementById('stat-M'),
+        H: document.getElementById('stat-H'),
+        S: document.getElementById('stat-S'),
+        Status: document.getElementById('stat-status'),
+        TPS: document.getElementById('stat-tps'),
+        // M and TPS assume they are updated elsewhere
+    };
+    
+    let messageCount = 0; 
+    
+    /** Ensures the chat scrolls to the bottom. */
+    function scrollToBottom() {
+        chatAreaWrapper.scrollTop = chatAreaWrapper.scrollHeight;
+    }
+
+    /** Updates the statistics bar. */
+    async function updatePerformanceStats() {
+        try {
+            // Fetch data from the new endpoint
+            const response = await fetch('/api/stats');
+            const data = await response.json();
+
+            const tps = data.tokens_per_second;
+            
+            // Update the HTML element
+            if (statsElements.TPS) {
+                // Display formatted to 2 decimal places
+                statsElements.TPS.textContent = tps.toFixed(2); 
+            }
+
+        } catch (error) {
+            console.error('Failed to fetch agent statistics:', error);
+            // Optionally show an error on the stat bar
+        }
+    }
+    function updateGeneralStats(messages) {
+        if (!chatArea) return;
+        
+        if (statsElements.M) {
+            statsElements.M.textContent = messages;
+        }
+        if (statsElements.H) {
+            statsElements.H.textContent = chatArea.scrollHeight;
+        }
+        if (statsElements.S) {
+            statsElements.S.textContent = chatArea.scrollTop;
+        }
+    }
+    function updateStreamingStatus(state) {
+        if (!statsElements.Status) return;
+
+        if (state === 'progress') {
+            statsElements.Status.textContent = 'progress';
+            statsElements.Status.style.color = 'orange';
+        } else {
+            statsElements.Status.textContent = 'idle';
+            statsElements.Status.style.color = 'green';
+        }
+    }
+    
+    /** Copies the content of a message block to the clipboard. */
+    function copyMessage(element) {
+        const contentSpan = element.querySelector('.message-content-text');
+        if (!contentSpan) return;
+        
+        const textToCopy = contentSpan.innerText;
+        
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            try {
+                navigator.clipboard.writeText(textToCopy);
+                console.log("Content successfully copied using modern API.");
+                // You can add visual feedback here (e.g., changing the button text to "Copied!")
+                return true;
+            } catch (err) {
+                console.error("Error in modern API copy operation. Trying fallback:", err);
+                // Fallback if the modern API fails (e.g., due to permission issues in some contexts)
+                return fallbackCopyTextToClipboard(textToCopy);
+            }
+        } else {
+            // 2. Fallback for older browsers
+            console.warn("Clipboard API not supported. Using legacy fallback.");
+            return fallbackCopyTextToClipboard(textToCopy);
+        }
+    }
+    
+    /**
+     * Legacy fallback function using the deprecated document.execCommand('copy').
+     * Creates a temporary textarea element, selects its content, and executes the command.
+     * * @param {string} textToCopy - The string content to be copied.
+     * @returns {boolean} True if the fallback copy was successful.
+     */
+    function fallbackCopyTextToClipboard(textToCopy) {
+        const textArea = document.createElement("textarea");
+        textArea.value = textToCopy;
+
+        // Make the textarea invisible and outside the viewport
+        textArea.style.position = "fixed";
+        textArea.style.left = "-9999px";
+        textArea.style.top = "-9999px";
+
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select(); // Select the text inside the textarea
+
+        try {
+            const successful = document.execCommand('copy');
+            if (successful) {
+                console.log("Content successfully copied using fallback.");
+                document.body.removeChild(textArea);
+                return true;
+            } else {
+                console.error('Fallback: Copy failed with execCommand.');
+                document.body.removeChild(textArea);
+                return false;
+            }
+        } catch (err) {
+            console.error('Fallback: Error during copy operation:', err);
+            document.body.removeChild(textArea);
+            return false;
+        }
+    }
+
+    /**
+     * Creates and adds a message element to the chat area.
+     * Returns an object containing the content span, the footer element, and the copy button element.
+     */
+    function createMessage(content, senderType) {
+        const rowDiv = document.createElement('div');
+        rowDiv.className = `message-row ${senderType}-message-row`;
+
+        const contentWrapper = document.createElement('div');
+        contentWrapper.className = 'message-content-wrapper';
+        
+        // --- 1. Create Prefix Span ---
+        const prefixText = senderType === 'user' ? '[You]' : '[{{ ragName }}]';
+        const prefixClass = senderType === 'user' ? 'you-prefix' : '';
+        const prefixSpan = document.createElement('span');
+        prefixSpan.className = `prefix ${prefixClass}`;
+        prefixSpan.textContent = prefixText;
+        
+        // --- 2. Create Content Span (for append/copy) ---
+        const contentSpan = document.createElement('span');
+        contentSpan.className = 'message-content-text';
+        contentSpan.innerHTML = content; 
+        
+        // --- 3. Create Main Text Container ---
+        const messageText = document.createElement('div');
+        messageText.className = 'message-text';
+        messageText.appendChild(prefixSpan);
+        messageText.appendChild(contentSpan); 
+        
+        // --- 4. Create Copy Button (Icon) ---
+        const copyBtn = document.createElement('button');
+        copyBtn.className = 'copy-button';
+        copyBtn.title = 'Copy code';
+        
+        // Icon SVG (Copy/Clipboard symbol)
+        copyBtn.innerHTML = `
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+            </svg>`;
+        
+        copyBtn.onclick = () => copyMessage(messageText); 
+        
+        // --- 5. Append to Wrapper ---
+        contentWrapper.appendChild(messageText);
+        
+        if (senderType === 'ai') {
+             // Add copy button directly to the wrapper for absolute positioning
+             contentWrapper.appendChild(copyBtn);
+        }
+
+        rowDiv.appendChild(contentWrapper);
+        chatArea.appendChild(rowDiv);
+        scrollToBottom();
+        
+        return { contentSpan: contentSpan, copyButton: copyBtn, messageTextDiv: messageText }; 
+    }
+
+    /** Main function for sending the message and handling the STREAMING response. */
+    async function sendMessage() {
+        const question = input.value.trim();
+        if (question === '') return;
+
+        sendButton.disabled = true;
+        input.disabled = true;
+
+        // 1. Print user message
+        createMessage(question, 'user');
+        input.value = '';
+        messageCount++; 
+        updateGeneralStats(messageCount);
+
+        // 2. Prepare the container for the AI response
+        const { contentSpan: aiContentSpan, copyButton: aiCopyButton, messageTextDiv: aiMessageTextDiv } = createMessage('', 'ai');
+        
+        // Initially hide copy button until stream is done
+        aiCopyButton.style.display = 'none'; 
+        updateStreamingStatus('progress');
+
+        try {
+            const response = await fetch('/api/chat', { 
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ question: question }) 
+            });
+
+            if (!response.ok) {
+                const errorMessage = `Streaming API Error: ${response.status} ${response.statusText}.`;
+                throw new Error(errorMessage);
+            }
+
+            // 3. Read the Data Stream
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder('utf-8');
+            
+            // Clear initial content from the content span (only the prefix remains in the messageTextDiv)
+            aiContentSpan.innerHTML = '';
+            
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+
+                let chunk = decoder.decode(value, { stream: true });
+                chunk = chunk.replace(/\n/g, '<br>');
+                
+                // --- APPEND THE CHUNK and SCROLL ---
+                aiContentSpan.innerHTML += chunk; 
+                scrollToBottom(); 
+            }
+
+            // Updates stats
+            updateStreamingStatus('idle');
+            await updatePerformanceStats();
+
+            // 4. End of streaming: Update counter and finalize the message
+            messageCount++; 
+            updateGeneralStats(messageCount);
+            
+            aiCopyButton.style.display = 'block'; // Show copy button
+
+        } catch (error) {
+            console.error('Streaming error:', error);
+            
+            const errorMessage = `<span style="color:red;">Connection Error or Stream Interrupted.</span>`;
+            
+            aiContentSpan.innerHTML = errorMessage;
+            
+        } finally {
+            sendButton.disabled = false;
+            input.disabled = false;
+            input.focus();
+        }
+    }
+    
+    // Enable/disable send button based on input value
+    input.addEventListener('input', () => {
+        sendButton.disabled = input.value.trim() === '';
+    });
+
+
+    // Enable sending with the Enter key
+    input.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter' && !sendButton.disabled) {
+            e.preventDefault();
+            sendMessage();
+        }
+    });
+
+    // Function to populate the initial chat messages (Welcome message)
+    function populateInitialMessages() {
+        const welcomeMessage = "Welcome! I am {{ ragName }}, Agent WebUI. Could I help you? Ask me your question.";
+        const { contentSpan, copyButton, messageTextDiv } = createMessage(welcomeMessage, 'ai');
+        
+        // System Message adjustments
+        const prefixElement = messageTextDiv.querySelector('.prefix');
+        if(prefixElement) {
+             prefixElement.textContent = '[System]';
+             prefixElement.style.color = 'var(--color-system)';
+        }
+        
+        // Ensure system message style is bold
+        contentSpan.parentNode.parentNode.style.fontWeight = 'bold';
+        
+        // Hide copy button for the initial system message
+        copyButton.style.display = 'none';
+    }
+
+    // Initialization
+    window.onload = () => {
+        populateInitialMessages();
+        updateGeneralStats(messageCount);
+        input.focus();
+    };
+
+</script>
+</body>
+</html>

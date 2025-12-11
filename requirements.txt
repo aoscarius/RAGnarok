@@ -1,0 +1,13 @@
+#
+flask
+#
+pydantic
+#
+langchain
+langchain-chroma
+langchain-community
+#
+llama-cpp-python --config-settings=cmake.args="-DLLAMA_CPU_FEATURES=avx2"
+#
+unstructured[md]
+unstructured[html]

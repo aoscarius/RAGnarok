@@ -1,0 +1,32 @@
+{
+    "docs_path": "docs",
+    "db_path": "chromadb",
+    "db_collection": "documents",
+    "models_path": "models",
+    "llm": {
+        "model_name": "phi-3-mini.gguf",
+        "model_url": "https://huggingface.co/microsoft/Phi-3-mini-4k-instruct-gguf/resolve/main/Phi-3-mini-4k-instruct-q4.gguf",
+        "model_url_alt1": "https://huggingface.co/TheBloke/Llama-2-7B-GGUF/resolve/main/llama-2-7b.Q4_K_M.gguf",
+        "model_url_alt2": "https://huggingface.co/NoelJacob/Meta-Llama-3-8B-Instruct-Q4_K_M-GGUF/resolve/main/meta-llama-3-8b-instruct.Q4_K_M.gguf",
+        "n_gpu_layers": 0,
+        "temperature": 0.2,
+        "top_p": 0.9,
+        "max_tokens": 1024,
+        "n_ctx": 4096,
+        "n_batch": 64,
+        "verbose": false
+    },
+    "embed": {
+        "model_name": "bge-small-en.gguf",
+        "model_url": "https://huggingface.co/nesall/bge-small-en-v1.5-Q4_K_M-GGUF/resolve/main/bge-small-en-v1.5-q4_k_m.gguf",
+        "model_url_alt1": "https://huggingface.co/nomic-ai/nomic-embed-text-v1.5-GGUF/resolve/main/nomic-embed-text-v1.5.Q4_K_M.gguf",
+        "model_url_alt2": "https://huggingface.co/Snowflake/snowflake-arctic-embed-m-v1.5/resolve/main/gguf/snowflake-arctic-embed-m-v1.5-tq2_0.gguf",
+        "n_gpu_layers": 0,
+        "temperature": 0.2,
+        "top_p": 0.9,
+        "max_tokens": 32,
+        "n_ctx": 512,
+        "n_batch": 64,
+        "verbose": false
+    }
+}
