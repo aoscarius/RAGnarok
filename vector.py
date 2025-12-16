@@ -8,10 +8,29 @@ from langchain_chroma import Chroma
 from langchain_text_splitters.markdown import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores.utils import filter_complex_metadata
 from langchain_community.document_loaders import (
+    TextLoader,
     UnstructuredMarkdownLoader,
     UnstructuredHTMLLoader,
     UnstructuredFileLoader
 )
+
+# Code file extensions set
+codeExtensions = {".c", ".h", ".cpp", ".hpp", ".s", ".S", ".ld"}
+
+# Document loaders map with extensions
+loadersMap = {
+    ".txt": (TextLoader, {"encoding": "utf-8"}),
+    ".html": (UnstructuredHTMLLoader, {}),
+    ".htm": (UnstructuredHTMLLoader, {}),
+    ".md": (UnstructuredMarkdownLoader, {}),
+    ".c": (TextLoader, {"encoding": "utf-8"}),
+    ".h": (TextLoader, {"encoding": "utf-8"}),
+    ".cpp": (TextLoader, {"encoding": "utf-8"}),
+    ".hpp": (TextLoader, {"encoding": "utf-8"}),
+    ".s": (TextLoader, {"encoding": "utf-8"}),
+    ".S": (TextLoader, {"encoding": "utf-8"}),
+    ".ld": (TextLoader, {"encoding": "utf-8"}),
+}
 
 class LlamaCppEmbedder:
     """ Simple llama-cpp embedded class implementation """
@@ -29,7 +48,7 @@ class LlamaCppEmbedder:
             _stderr = sys.stderr
             sys.stderr = ferr
 
-            for t in tqdm(texts, desc="Embedding documents", unit="chunk", file=sys.stdout):
+            for t in tqdm(texts, desc="Embedding documents", unit=" chunk", file=sys.stdout):
                 emb = self.embed.create_embedding(t)["data"][0]["embedding"]
                 embeddings.append(emb)
 
@@ -40,18 +59,24 @@ class LlamaCppEmbedder:
     def embed_query(self, text):
         return self.embed.create_embedding(text)["data"][0]["embedding"]
 
-def loadFiles(filepath):
+def loadFile(filepath):
     """ Return a list of loaded document files """
-    ext = filepath.lower()
+    ext = "." + filepath.lower().rsplit(".", 1)[-1]
 
     try:
-        if ext.endswith(".md"):
-            return UnstructuredMarkdownLoader(filepath).load()
-        elif ext.endswith(".html") or ext.endswith(".htm"):
-            return UnstructuredHTMLLoader(filepath).load()
-        elif ext.endswith(".txt"):
-            return UnstructuredFileLoader(filepath, mode="elements").load()
+        if ext in loadersMap:
+            # Load associated loader
+            loaderClass, loaderArgs = loadersMap[ext]
+            docs = loaderClass(filepath, **loaderArgs).load()
+            # Add extra metadata
+            for d in docs:
+                d.metadata.update({
+                    "source": filepath, "extension": ext,
+                    "file_type": "code" if ext in codeExtensions else "text"
+                })
+            return docs            
         else:
+            print(f"[WARN] Unsupported file extension '{ext}'")
             return []
 
     except Exception as e:
@@ -105,21 +130,28 @@ def documentRag(
         chunk_size=chunk_size,
         chunk_overlap=chunk_overlap
     )
+    code_splitter = RecursiveCharacterTextSplitter(
+        chunk_size=chunk_size,
+        chunk_overlap=chunk_overlap,
+        separators=[
+            "\n\n", "\n", ";", "{", "}", " "
+        ]
+    )
 
     # Create DB if missing
     if not os.path.exists(db_path):
         print(f"[INFO] Creating new Chroma DB at: {db_path}")
 
         all_docs = []
-        supported_ext = (".md", ".txt", ".html", ".htm")
+        supported_ext = tuple(loadersMap.keys())
         print(f"[INFO] Supported scanning files: {supported_ext}")
 
         # Recursively scan docs directory
-        for root, dirs, files in os.walk(source_directory):
+        for root, _, files in os.walk(source_directory):
             for filename in files:
                 filepath = os.path.join(root, filename).replace("\\", "/")
                 if filename.lower().endswith(supported_ext):
-                    docs = loadFiles(filepath)
+                    docs = loadFile(filepath)
 
                     if docs:
                         print(f"[OK] Loaded file: {filename} → {len(docs)} docs")
@@ -131,7 +163,13 @@ def documentRag(
             raise ValueError(f"No {supported_ext} files could be loaded.")
 
         # Generate chunks using text_splitters
-        chunks = text_splitter.split_documents(all_docs)
+        chunks = []
+        for d in tqdm(all_docs, desc="Splitting documents into chunks", unit=" document", file=sys.stdout):
+            if d.metadata.get("file_type") == "code":
+                d_chunks = code_splitter.split_documents([d])
+            else:
+                d_chunks = text_splitter.split_documents([d])
+            chunks.extend(d_chunks)
         # Clean empty chunks
         chunks = [c for c in chunks if c.page_content.strip()]
         # Remove metadata that Chroma does not support

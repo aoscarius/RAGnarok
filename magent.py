@@ -40,6 +40,11 @@ class llmRag:
             max_tokens=1024,
             n_ctx=4096,
             n_batch=64,
+            stop=[
+                "<|user|>",
+                "<|system|>",
+                "<|assistant|>",
+            ],
             verbose=False
         )
 
