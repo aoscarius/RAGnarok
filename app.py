@@ -19,7 +19,7 @@ def tui_mode():
     """ Runs the TUI (Textual User Interface) mode. """
     global ragAgent # Ensure globals are accessible
 
-    tui = CursesTUI(ragAgent=None, ragName="Ragnarok")
+    tui = CursesTUI(ragAgent=ragAgent, ragName="Ragnarok")
     tui.run()
 
 # --- CLI Mode Implementation ---
