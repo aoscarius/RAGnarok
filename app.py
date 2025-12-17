@@ -95,19 +95,25 @@ if __name__ == "__main__":
 
         # Load the config file
         config = json.load(f)
+        
+        # Extract paths from config with defaults
+        models_path = config.get("models_path", "models")
+        llm_url = config.get("llm", {}).get("url", "https://huggingface.co/TheBloke/Llama-2-7B-GGUF/resolve/main/llama-2-7b.Q4_K_M.gguf")
+        embed_url = config.get("embed", {}).get("url", "https://huggingface.co/nesall/bge-small-en-v1.5-Q4_K_M-GGUF/resolve/main/bge-small-en-v1.5-q4_k_m.gguf")
 
         # Check for models already downloaded
-        llm_path = modelDownload(config["llm"]["model_url"], config["models_path"], config["llm"]["model_name"])
-        embed_path = modelDownload(config["embed"]["model_url"], config["models_path"], config["embed"]["model_name"])
+        print(f"[INFO] Checking models into '{models_path}' folder...")
+        llm_path = modelDownload(llm_url, models_path)
+        embed_path = modelDownload(embed_url, models_path)
 
         # 1. Argument Parsing
-        parser = argparse.ArgumentParser(description="RAG Agent with CLI and Web UI support.")
+        parser = argparse.ArgumentParser(description="RAG Agent with TUI, CLI and Web UI support.")
         parser.add_argument("--tui", action="store_true", help="Runs the chatbot in Textual User Interface (TUI) mode.")
         parser.add_argument("--cli", action="store_true", help="Runs the chatbot in Command Line Interface (CLI) mode.")
         args = parser.parse_args()
         
         # RAG System Initialization
-        ragAgent = llmRag(llm_path, embed_path, config["docs_path"], config["db_path"])
+        ragAgent = llmRag(llm_path, embed_path, config)
 
         if (len(sys.argv)-1) > 0:
             with open(os.devnull, 'w') as ferr:

@@ -29,7 +29,6 @@
             font-family: 'Arial', sans-serif;
             background-color: var(--bg-primary);
             color: var(--text-main);
-            user-select: none;
         }
 
         /* Hide Scrollbar (Cross-Browser) */
@@ -588,7 +587,7 @@
         // System Message adjustments
         const prefixElement = messageTextDiv.querySelector('.prefix');
         if(prefixElement) {
-             prefixElement.textContent = '[System]';
+             prefixElement.textContent = '[{{ ragName }}]';
              prefixElement.style.color = 'var(--color-system)';
         }
         

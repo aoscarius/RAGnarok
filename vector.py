@@ -90,6 +90,7 @@ def documentRag(
     collection_name: str = "documents",
     chunk_size: int = 1000,
     chunk_overlap: int = 150,
+    config = {}
   ):
     """
     Creates or updates a vector database from accepted files in a specified folder.
@@ -116,13 +117,15 @@ def documentRag(
     print(f"[INFO] Loading embeddings model from: {model_path}")
     embeddings = LlamaCppEmbedder(
             model_path=model_path,
-            n_threads=int(os.cpu_count() / 2),
-            n_gpu_layers=0,
-            temperature=0.2,
-            top_p=0.9,
-            max_tokens=32,
-            n_ctx=512,
-            verbose=False,
+            n_threads=int(os.cpu_count() / 3),
+            n_gpu_layers=config.get("embed", {}).get("n_gpu_layers", 0),
+            temperature=config.get("embed", {}).get("temperature", 0.2),
+            top_p=config.get("embed", {}).get("top_p", 0.9),
+            max_tokens=config.get("embed", {}).get("max_tokens", 32),
+            n_ctx=config.get("embed", {}).get("n_ctx", 512),
+            n_batch=config.get("embed", {}).get("n_batch", 64),
+            streaming=config.get("embed", {}).get("streaming", False),
+            verbose=config.get("embed", {}).get("verbose", False)
     )
 
     print(f"[INFO] Initialize recursive text splitter")
@@ -203,4 +206,7 @@ def documentRag(
     except Exception:
         print("Warning: unable to count stored documents.")
 
+    print(f"[INFO] RAG is ready to use.")
+    print(f"[INFO] Setup completed in {time.time() - start_time:.2f} seconds.")
+    
     return vector_store.as_retriever(search_kwargs={"k": 5})
