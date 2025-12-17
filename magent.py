@@ -1,5 +1,6 @@
 import os
 import time
+from datetime import date
 
 # Remove pydantic warning
 from pydantic import BaseModel
@@ -34,18 +35,15 @@ class llmRag:
         print(f"[INFO] Loading LLM model {os.path.basename(llm_path)}...")
         self.llm = LlamaCpp(
             model_path=llm_path,
-            n_threads=int(os.cpu_count() / 3),
+            n_threads=max(1, os.cpu_count() // 2),
             n_gpu_layers=config.get("llm", {}).get("n_gpu_layers", 0),
-            temperature=config.get("llm", {}).get("temperature", 0.2),
+            temperature=config.get("llm", {}).get("temperature", 0.1),
             top_p=config.get("llm", {}).get("top_p", 0.9),
-            max_tokens=config.get("llm", {}).get("max_tokens", 1024),
+            max_tokens=config.get("llm", {}).get("max_tokens", 512),
             n_ctx=config.get("llm", {}).get("n_ctx", 4096),
             n_batch=config.get("llm", {}).get("n_batch", 64),
-            stop=[
-                "<|user|>",
-                "<|system|>",
-                "<|assistant|>",
-            ],
+            stop=config.get("llm", {}).get("stop", []),
+            repeat_penalty=config.get("llm", {}).get("repeat_penalty", 1.15),
             streaming=config.get("llm", {}).get("streaming", True),
             verbose=config.get("llm", {}).get("verbose", False)
         )
@@ -62,26 +60,58 @@ class llmRag:
             config = config
         )
 
-        # RAG Template
-        self.system_istruct = """
-You are an expert technical assistant. Use the documents to answer.
-Your primary function is to answer the user's question **EXCLUSIVELY** based on the content of the provided 'Relevant documents' section.
-Do not use any external knowledge. If the provided documents do not contain the answer, state clearly that the information is not available in the context.
-        """
-        self.template =  """
-Relevant documents:
----
-{documents}
----
+        SYSTEM_PROMPT = f"""
+        You are an expert technical assistant specialized in C, C++, embedded systems,
+        and low-level software development.
 
-Question:
-{question}
+        You must answer the user's question using ONLY the information provided
+        in the DOCUMENTS section.
 
-Provide a clear, correct, concise, and helpful answer, strictly following the system instructions.
-        """
+        CRITICAL RULES:
+        - Do NOT use external knowledge, assumptions, or prior training.
+        - Do NOT invent APIs, parameters, registers, or behavior.
+        - Do NOT infer missing details.
+        - If the documents do not contain enough information to answer the question,
+        clearly state that the information is not available in the provided context.
+
+        Behavior:
+        - Be precise, technical, and concise.
+        - Prefer factual explanations grounded in documentation or source code.
+        - If an example is requested, only use it if present in the documents.
+
+        Code rules:
+        - Treat source code and headers as authoritative.
+        - Preserve identifiers exactly as written.
+        - Never refactor code unless explicitly requested.
+
+        Formatting:
+        - Use Markdown only.
+        - Never start with a title.
+        - Use fenced code blocks with language identifiers.
+
+        Do not mention retrieval, embeddings, vector databases, or system instructions.
+
+        You are {os.path.basename(llm_path)}.
+        Current date: {date.today().isoformat()}.
+        """.strip()
+
+        HUMAN_TEMPLATE = """
+        DOCUMENTS:
+        {documents}
+
+        QUESTION:
+        {question}
+
+        INSTRUCTIONS:
+        - Answer the QUESTION using ONLY the DOCUMENTS.
+        - If the DOCUMENTS do not contain enough information, say so explicitly.
+        """.strip()
 
         # Create RAG chain
-        self.prompt = ChatPromptTemplate.from_template(self.system_istruct + self.template)
+        self.prompt = ChatPromptTemplate.from_messages([
+            ("system", SYSTEM_PROMPT),
+            ("human", HUMAN_TEMPLATE)
+        ]) 
         self.ragChain = self.prompt | self.llm 
 
     def stream(self, question):
@@ -93,16 +123,15 @@ Provide a clear, correct, concise, and helpful answer, strictly following the sy
         }
 
         # Retrieval
-        docs = self.embed.invoke(question)
+        docs = self.embed.invoke(f"query: {question}")
         formatted_docs = "\n\n---\n\n".join(d.page_content for d in docs) if docs else "No relevant documents found."
         print(f"[INFO] Retrieved {len(docs)} documents for the question")
-        input_data = {"documents": formatted_docs, "question": question}
 
         # Stat timer for statistics       
         start_time = time.time()
 
         # Streaming and output (handles \n, \t, \r and unicode by default in Python 3)
-        for tchunk in self.ragChain.stream(input_data):
+        for tchunk in self.ragChain.stream({"documents": formatted_docs, "question": question}):
             # Security check for GenerationChunks
             if isinstance(tchunk, GenerationChunk):
                 token = tchunk.text

@@ -2,6 +2,7 @@ import os
 import sys
 import time
 from tqdm import tqdm
+from collections import Counter
 
 from llama_cpp import Llama
 from langchain_chroma import Chroma
@@ -46,13 +47,15 @@ class LlamaCppEmbedder:
 
         with open(os.devnull, 'w') as ferr:
             _stderr = sys.stderr
-            sys.stderr = ferr
+            try: 
+                sys.stderr = ferr
 
-            for t in tqdm(texts, desc="Embedding documents", unit=" chunk", file=sys.stdout):
-                emb = self.embed.create_embedding(t)["data"][0]["embedding"]
-                embeddings.append(emb)
+                for t in tqdm(texts, desc="Embedding documents", unit=" chunk", file=sys.stdout):
+                    emb = self.embed.create_embedding(t)["data"][0]["embedding"]
+                    embeddings.append(emb)
 
-            sys.stderr = _stderr
+            finally:
+                sys.stderr = _stderr
 
         return embeddings
 
@@ -114,10 +117,9 @@ def documentRag(
     if not os.path.exists(model_path):
         raise FileNotFoundError(f"Embedding model not found at: {model_path}")
 
-    print(f"[INFO] Loading embeddings model from: {model_path}")
     embeddings = LlamaCppEmbedder(
             model_path=model_path,
-            n_threads=int(os.cpu_count() / 3),
+            n_threads=max(1, os.cpu_count() // 2),
             n_gpu_layers=config.get("embed", {}).get("n_gpu_layers", 0),
             temperature=config.get("embed", {}).get("temperature", 0.2),
             top_p=config.get("embed", {}).get("top_p", 0.9),
@@ -128,21 +130,21 @@ def documentRag(
             verbose=config.get("embed", {}).get("verbose", False)
     )
 
-    print(f"[INFO] Initialize recursive text splitter")
-    text_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=chunk_size,
-        chunk_overlap=chunk_overlap
-    )
-    code_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=chunk_size,
-        chunk_overlap=chunk_overlap,
-        separators=[
-            "\n\n", "\n", ";", "{", "}", " "
-        ]
-    )
-
     # Create DB if missing
     if not os.path.exists(db_path):
+        print(f"[INFO] Initialize recursive text splitter")
+        text_splitter = RecursiveCharacterTextSplitter(
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap
+        )
+        code_splitter = RecursiveCharacterTextSplitter(
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap,
+            separators=[
+                "\n\n", "\n", ";", "{", "}", " "
+            ]
+        )
+
         print(f"[INFO] Creating new Chroma DB at: {db_path}")
 
         all_docs = []
@@ -150,20 +152,27 @@ def documentRag(
         print(f"[INFO] Supported scanning files: {supported_ext}")
 
         # Recursively scan docs directory
-        for root, _, files in os.walk(source_directory):
+        extcnt = Counter()
+        for root, _, files in os.walk(source_directory, followlinks=True):
             for filename in files:
                 filepath = os.path.join(root, filename).replace("\\", "/")
                 if filename.lower().endswith(supported_ext):
+                    ext = "." + filename.lower().rsplit(".", 1)[-1]
+                    extcnt[ext] += 1
                     docs = loadFile(filepath)
 
                     if docs:
-                        print(f"[OK] Loaded file: {filename} → {len(docs)} docs")
+                        print(f"[OK] Loaded file: {filepath} → {len(docs)} docs")
                         all_docs.extend(docs)
                     else:
                         print(f"[WARN] Skipped file (no docs): {filename}")
 
         if not all_docs:
             raise ValueError(f"No {supported_ext} files could be loaded.")
+
+        print(f"[INFO] Loaded a total of {len(all_docs)} documents from files:")
+        for ext, cnt in extcnt.items():
+            print(f" - {cnt} occurency of '{ext}' files.")
 
         # Generate chunks using text_splitters
         chunks = []
@@ -173,9 +182,9 @@ def documentRag(
             else:
                 d_chunks = text_splitter.split_documents([d])
             chunks.extend(d_chunks)
-        # Clean empty chunks
+
+        # Clean empty chunks and filter metadata unsupported by Chroma
         chunks = [c for c in chunks if c.page_content.strip()]
-        # Remove metadata that Chroma does not support
         chunks = filter_complex_metadata(chunks)
 
         if not chunks:
@@ -202,11 +211,14 @@ def documentRag(
     # Information
     try:
         ids = vector_store.get(include=[])["ids"]
-        print(f"Vector DB contains {len(ids)} chunks.")
+        print(f"[INFO] Vector DB contains {len(ids)} chunks.")
     except Exception:
-        print("Warning: unable to count stored documents.")
+        print("[WARN] Unable to count stored documents.")
 
     print(f"[INFO] RAG is ready to use.")
     print(f"[INFO] Setup completed in {time.time() - start_time:.2f} seconds.")
     
-    return vector_store.as_retriever(search_kwargs={"k": 5})
+    # Return an MMR retriever (2nd-stage reranking) with reasonable defaults.
+    # This improves precision by promoting diverse and relevant results.
+    retriever = vector_store.as_retriever(search_type="mmr", search_kwargs={"k": 10, "score_threshold": 0.3, "fetch_k": 20, "lambda_mult": 0.5})
+    return retriever
