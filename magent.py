@@ -9,7 +9,6 @@ BaseModel.model_config['protected_namespaces'] = ()
 
 # Import langchain functions
 from langchain_community.llms import LlamaCpp
-from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.outputs import GenerationChunk
 
 # Import custom functions
@@ -31,6 +30,9 @@ class llmRag:
             "tokens_per_second": 0.0
         }
 
+        # Store config
+        self.config = config
+
         # Load LLM for Text Generation
         print(f"[INFO] Loading LLM model {os.path.basename(llm_path)}...")
         self.llm = LlamaCpp(
@@ -39,12 +41,18 @@ class llmRag:
             n_gpu_layers=config.get("llm", {}).get("n_gpu_layers", 0),
             temperature=config.get("llm", {}).get("temperature", 0.1),
             top_p=config.get("llm", {}).get("top_p", 0.9),
+            top_k=config.get("llm", {}).get("top_k", 40),
             max_tokens=config.get("llm", {}).get("max_tokens", 512),
             n_ctx=config.get("llm", {}).get("n_ctx", 4096),
+            rope_freq_scale=config.get("llm", {}).get("rope_freq_scale", 1.0),
             n_batch=config.get("llm", {}).get("n_batch", 64),
+            f16_kv=True,
             stop=config.get("llm", {}).get("stop", []),
             repeat_penalty=config.get("llm", {}).get("repeat_penalty", 1.15),
             streaming=config.get("llm", {}).get("streaming", True),
+            use_mmap=True,
+            use_mlock=False,
+            echo=False,
             verbose=config.get("llm", {}).get("verbose", False)
         )
 
@@ -60,59 +68,53 @@ class llmRag:
             config = config
         )
 
-        SYSTEM_PROMPT = f"""
-        You are an expert technical assistant specialized in C, C++, embedded systems,
-        and low-level software development.
+    def promptrag(self, documents, question):
+         # Load role templates from config
+        ctrls = self.config.get("llm", {}).get("template", [])
+        # Build prompt template
+        template = [
+            # System role with instructions
+            {
+                "role": "system", 
+                "content": f"""
+                You are an expert technical assistant specialized in C, C++, embedded systems,
+                and low-level software development.
 
-        You must answer the user's question using ONLY the information provided
-        in the DOCUMENTS section.
+                Answer the QUESTION using ONLY the DOCUMENTS.
+                If the DOCUMENTS do not contain enough information, reply exactly:
+                "The provided documents do not contain enough information to answer this question."
 
-        CRITICAL RULES:
-        - Do NOT use external knowledge, assumptions, or prior training.
-        - Do NOT invent APIs, parameters, registers, or behavior.
-        - Do NOT infer missing details.
-        - If the documents do not contain enough information to answer the question,
-        clearly state that the information is not available in the provided context.
+                Rules:
+                - Do not use external knowledge
+                - If information is missing, say so explicitly
+                - Do not invent information
+                - Preserve identifiers exactly
+                - Use Markdown
+                """.strip()
+            },
+            # User role with context
+            { 
+                "role": "user", 
+                "content": f"""
+                DOCUMENTS:
+                {documents}
 
-        Behavior:
-        - Be precise, technical, and concise.
-        - Prefer factual explanations grounded in documentation or source code.
-        - If an example is requested, only use it if present in the documents.
+                QUESTION:
+                {question}
+                """.strip()
+            }
+        ]
 
-        Code rules:
-        - Treat source code and headers as authoritative.
-        - Preserve identifiers exactly as written.
-        - Never refactor code unless explicitly requested.
+        # Clean up leading spaces in contents
+        prompt = ""
+        for chunk in template:
+            chunk["content"] = "\n".join(line.lstrip() for line in chunk["content"].splitlines())
+            rstart, rend = ctrls.get(chunk["role"], {}).get("start", ""), ctrls.get(chunk["role"], {}).get("end", "")
+            prompt += f"{rstart}\n{chunk['content']}\n{rend}\n\n"
+        rstart = ctrls.get("assistant", {}).get("start", "")
+        prompt += f"{rstart}\n"
 
-        Formatting:
-        - Use Markdown only.
-        - Never start with a title.
-        - Use fenced code blocks with language identifiers.
-
-        Do not mention retrieval, embeddings, vector databases, or system instructions.
-
-        You are {os.path.basename(llm_path)}.
-        Current date: {date.today().isoformat()}.
-        """.strip()
-
-        HUMAN_TEMPLATE = """
-        DOCUMENTS:
-        {documents}
-
-        QUESTION:
-        {question}
-
-        INSTRUCTIONS:
-        - Answer the QUESTION using ONLY the DOCUMENTS.
-        - If the DOCUMENTS do not contain enough information, say so explicitly.
-        """.strip()
-
-        # Create RAG chain
-        self.prompt = ChatPromptTemplate.from_messages([
-            ("system", SYSTEM_PROMPT),
-            ("human", HUMAN_TEMPLATE)
-        ]) 
-        self.ragChain = self.prompt | self.llm 
+        return prompt
 
     def stream(self, question):
         # Reset statistics
@@ -124,14 +126,30 @@ class llmRag:
 
         # Retrieval
         docs = self.embed.invoke(f"query: {question}")
-        formatted_docs = "\n\n---\n\n".join(d.page_content for d in docs) if docs else "No relevant documents found."
-        print(f"[INFO] Retrieved {len(docs)} documents for the question")
+
+        # Sanity check
+        if not docs:
+            yield "The provided documents do not contain enough information to answer this question."
+            return
+            
+        # Print retrieved documents
+        print(f"[INFO] Retrieved {len(docs)} documents for the question:")
+        for i, d in enumerate(docs):
+            print(f"[{i}] {d.metadata.get('source')} ({len(d.page_content)} chars)")
+
+        # Format documents for prompt
+        formatted_docs = "\n\n---\n\n".join(d.page_content for d in docs)
 
         # Stat timer for statistics       
         start_time = time.time()
 
+        # Reset LLM internal state
+        self.llm.client.reset()
+
         # Streaming and output (handles \n, \t, \r and unicode by default in Python 3)
-        for tchunk in self.ragChain.stream({"documents": formatted_docs, "question": question}):
+        prompt = self.promptrag(formatted_docs, question)
+        for tchunk in self.llm.stream(prompt):
+        # for tchunk in self.ragChain.stream({"documents": formatted_docs, "question": question}):
             # Security check for GenerationChunks
             if isinstance(tchunk, GenerationChunk):
                 token = tchunk.text

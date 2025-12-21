@@ -119,14 +119,13 @@ def documentRag(
 
     embeddings = LlamaCppEmbedder(
             model_path=model_path,
-            n_threads=max(1, os.cpu_count() // 2),
+            n_threads=max(1, os.cpu_count() // 4),
             n_gpu_layers=config.get("embed", {}).get("n_gpu_layers", 0),
-            temperature=config.get("embed", {}).get("temperature", 0.2),
-            top_p=config.get("embed", {}).get("top_p", 0.9),
-            max_tokens=config.get("embed", {}).get("max_tokens", 32),
             n_ctx=config.get("embed", {}).get("n_ctx", 512),
             n_batch=config.get("embed", {}).get("n_batch", 64),
-            streaming=config.get("embed", {}).get("streaming", False),
+            use_mmap=True,
+            use_mlock=False,
+            streaming=False,
             verbose=config.get("embed", {}).get("verbose", False)
     )
 
@@ -153,8 +152,9 @@ def documentRag(
 
         # Recursively scan docs directory
         extcnt = Counter()
-        for root, _, files in os.walk(source_directory, followlinks=True):
-            for filename in files:
+        for root, dirs, files in os.walk(source_directory, followlinks=True):
+            dirs.sort()
+            for filename in sorted(files):
                 filepath = os.path.join(root, filename).replace("\\", "/")
                 if filename.lower().endswith(supported_ext):
                     ext = "." + filename.lower().rsplit(".", 1)[-1]
@@ -220,5 +220,13 @@ def documentRag(
     
     # Return an MMR retriever (2nd-stage reranking) with reasonable defaults.
     # This improves precision by promoting diverse and relevant results.
-    retriever = vector_store.as_retriever(search_type="mmr", search_kwargs={"k": 10, "score_threshold": 0.3, "fetch_k": 20, "lambda_mult": 0.5})
+    retriever = vector_store.as_retriever(
+        search_type="mmr", 
+        search_kwargs={
+            "k": 8, 
+            "fetch_k": 30, 
+            "lambda_mult": 0.6,
+            "score_threshold": 0.8
+        }
+    )
     return retriever
