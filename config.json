@@ -7,6 +7,7 @@
             "user": {"start": "<|user|>", "end": "<|end|>"},
             "assistant": {"start": "<|assistant|>", "end": ""}
        },
+        "history_window": 4,
         "n_gpu_layers": 0,
         "temperature": 0.2,
         "top_p": 0.9,

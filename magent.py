@@ -33,6 +33,11 @@ class llmRag:
         # Store config
         self.config = config
 
+        # Chat history
+        self.history = []
+        # History window size
+        self.history_k = config.get("llm", {}).get("history_window", 4)
+
         # Load LLM for Text Generation
         print(f"[INFO] Loading LLM model {os.path.basename(llm_path)}...")
         self.llm = LlamaCpp(
@@ -68,9 +73,16 @@ class llmRag:
             config = config
         )
 
-    def promptrag(self, documents, question):
+    def promptrag(self, documents, question, history=""):
          # Load role templates from config
         ctrls = self.config.get("llm", {}).get("template", [])
+
+        # Format history
+        prompt_history = ""
+        for chunk in history:
+            rstart, rend = ctrls.get(chunk["role"], {}).get("start", ""), ctrls.get(chunk["role"], {}).get("end", "")
+            prompt_history += f"{rstart}\n{chunk['content']}\n{rend}\n\n"
+
         # Build prompt template
         template = [
             # System role with instructions
@@ -80,7 +92,7 @@ class llmRag:
                 You are an expert technical assistant specialized in C, C++, embedded systems,
                 and low-level software development.
 
-                Answer the QUESTION using ONLY the DOCUMENTS.
+                Answer the QUESTION using ONLY the DOCUMENTS and consider the HISTORY for context.
                 If the DOCUMENTS do not contain enough information, reply exactly:
                 "The provided documents do not contain enough information to answer this question."
 
@@ -96,6 +108,9 @@ class llmRag:
             { 
                 "role": "user", 
                 "content": f"""
+                HISTORY:
+                {prompt_history}
+                
                 DOCUMENTS:
                 {documents}
 
@@ -137,6 +152,12 @@ class llmRag:
         for i, d in enumerate(docs):
             print(f"[{i}] {d.metadata.get('source')} ({len(d.page_content)} chars)")
 
+        # Update chat history
+        rhistory = self.history[-self.history_k:]
+        formatted_rhistory = ""
+        for msg in rhistory:
+            formatted_rhistory += f"{msg['role'].upper()}: {msg['content']}\n"
+
         # Format documents for prompt
         formatted_docs = "\n\n---\n\n".join(d.page_content for d in docs)
 
@@ -148,6 +169,7 @@ class llmRag:
 
         # Streaming and output (handles \n, \t, \r and unicode by default in Python 3)
         prompt = self.promptrag(formatted_docs, question)
+        response = ""
         for tchunk in self.llm.stream(prompt):
         # for tchunk in self.ragChain.stream({"documents": formatted_docs, "question": question}):
             # Security check for GenerationChunks
@@ -155,8 +177,13 @@ class llmRag:
                 token = tchunk.text
             else:
                 token = str(tchunk)
+            response += token
             self.token_stats["total_tokens"] += 1
             yield token.replace('\\n', '\n').replace('\\t', '\t').replace('\\r', '\r') # Little fixes
+
+        # Store response in the history
+        self.history.append({"role": "user", "content": question})
+        self.history.append({"role": "assistant", "content": response})
 
         # Stop timer and update statistics
         self.token_stats["time_elapsed"] = time.time() - start_time
