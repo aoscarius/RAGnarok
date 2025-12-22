@@ -117,6 +117,33 @@
             border-radius: 18px;
             position: relative; /* Needed for copy button positioning */
         }
+
+        /* Message Text Styles */
+        .message-text pre {
+            background: #0d0d0d;
+            padding: 10px;
+            border-radius: 8px;
+            overflow-x: auto;
+            margin: 10px 0;
+        }
+
+        /* Inline Code Style */
+        .message-text code {
+            background: #0d0d0d;
+            padding: 2px 6px;
+            border-radius: 6px;
+            font-family: monospace;
+        }
+
+        /* Code Block Language Label */
+        .code-label {
+            font-size: 0.7em;
+            color: #777;
+            margin-top: 4px;
+            margin-bottom: 14px;
+            font-family: 'Courier New', monospace;
+            text-align: right;
+        }
         
         /* AI Message Alignment & Bubble (Left) */
         .ai-message-row {
@@ -322,6 +349,30 @@
         chatAreaWrapper.scrollTop = chatAreaWrapper.scrollHeight;
     }
 
+    function simpleMarkdown(text) {
+        if (!text) return '';
+
+        // Escape HTML special characters
+        text = text
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;");
+        // Code blocks
+        text = text.replace(/```([a-zA-Z0-9_+-]+)?\n([\s\S]*?)```/g, (_, lang, code) => {
+            return `<pre><code>${code}</code></pre><div class="code-label">${lang.toLowerCase()} example</div>`;
+        });
+        // Inline code
+        text = text.replace(/`([^`\n]+)`/g, '<code>$1</code>');
+        // Bold
+        text = text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+        // Italics
+        text = text.replace(/\*(.*?)\*/g, '<em>$1</em>');
+        // Line breaks
+        text = text.replace(/\n/g, '<br>');
+
+        return text;
+}
+
     /** Updates the statistics bar. */
     async function updatePerformanceStats() {
         try {
@@ -489,6 +540,8 @@
 
     /** Main function for sending the message and handling the STREAMING response. */
     async function sendMessage() {
+        let aiRawBuffer = '';
+
         const question = input.value.trim();
         if (question === '') return;
 
@@ -534,12 +587,18 @@
                 if (done) break;
 
                 let chunk = decoder.decode(value, { stream: true });
-                chunk = chunk.replace(/\n/g, '<br>');
                 
-                // --- APPEND THE CHUNK and SCROLL ---
-                aiContentSpan.innerHTML += chunk; 
+                // Append to raw buffer
+                aiRawBuffer += chunk;
+                
+                // Append chunk to the content span
+                chunk = chunk.replace(/\n/g, '<br>');
+                aiContentSpan.innerHTML += chunk;
                 scrollToBottom(); 
             }
+
+            // Final formatting after streaming is complete
+            aiContentSpan.innerHTML = simpleMarkdown(aiRawBuffer);
 
             // Updates stats
             updateStreamingStatus('idle');

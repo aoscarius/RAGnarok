@@ -140,7 +140,7 @@ class llmRag:
         }
 
         # Retrieval
-        docs = self.embed.invoke(f"query: {question}")
+        docs = self.embed.invoke(question)
 
         # Sanity check
         if not docs:

@@ -6,14 +6,16 @@ from collections import Counter
 
 from llama_cpp import Llama
 from langchain_chroma import Chroma
-from langchain_text_splitters.markdown import RecursiveCharacterTextSplitter
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores.utils import filter_complex_metadata
 from langchain_community.document_loaders import (
     TextLoader,
     UnstructuredMarkdownLoader,
     UnstructuredHTMLLoader,
-    UnstructuredFileLoader
 )
+
+# Custom HTML loader using BeautifulSoup4
+from loaders import BS4HTMLLoader
 
 # Code file extensions set
 codeExtensions = {".c", ".h", ".cpp", ".hpp", ".s", ".S", ".ld"}
@@ -21,8 +23,8 @@ codeExtensions = {".c", ".h", ".cpp", ".hpp", ".s", ".S", ".ld"}
 # Document loaders map with extensions
 loadersMap = {
     ".txt": (TextLoader, {"encoding": "utf-8"}),
-    ".html": (UnstructuredHTMLLoader, {}),
-    ".htm": (UnstructuredHTMLLoader, {}),
+    ".html": (BS4HTMLLoader, {}),
+    ".htm": (BS4HTMLLoader, {}),
     ".md": (UnstructuredMarkdownLoader, {}),
     ".c": (TextLoader, {"encoding": "utf-8"}),
     ".h": (TextLoader, {"encoding": "utf-8"}),
@@ -70,14 +72,21 @@ def loadFile(filepath):
         if ext in loadersMap:
             # Load associated loader
             loaderClass, loaderArgs = loadersMap[ext]
-            docs = loaderClass(filepath, **loaderArgs).load()
+            
+            if loaderClass is BS4HTMLLoader:
+                docs = loaderClass(filepath)
+            else:
+                docs = loaderClass(filepath, **loaderArgs).load()
+            
             # Add extra metadata
             for d in docs:
                 d.metadata.update({
                     "source": filepath, "extension": ext,
-                    "file_type": "code" if ext in codeExtensions else "text"
+                    "file_type": "code" if ext in codeExtensions else d.metadata.get("file_type", "text")
                 })
+            
             return docs            
+       
         else:
             print(f"[WARN] Unsupported file extension '{ext}'")
             return []
@@ -132,16 +141,26 @@ def documentRag(
     # Create DB if missing
     if not os.path.exists(db_path):
         print(f"[INFO] Initialize recursive text splitter")
+        
+        # Smaller chunks for better semantic matching
         text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=chunk_size,
-            chunk_overlap=chunk_overlap
+            chunk_overlap=chunk_overlap,
+            length_function=len,
+            is_separator_regex=False,
         )
+        
+        # Code splitter with better separators
         code_splitter = RecursiveCharacterTextSplitter(
             chunk_size=chunk_size,
             chunk_overlap=chunk_overlap,
             separators=[
-                "\n\n", "\n", ";", "{", "}", " "
-            ]
+                "\n\n",  # Function boundaries
+                "\nstatic ", "\nextern ", "\nvoid ", "\nint ", "\nchar ",  # Function declarations
+                "\n", ";", "{", "}", " "
+            ],
+            length_function=len,
+            is_separator_regex=False,
         )
 
         print(f"[INFO] Creating new Chroma DB at: {db_path}")
@@ -218,15 +237,16 @@ def documentRag(
     print(f"[INFO] RAG is ready to use.")
     print(f"[INFO] Setup completed in {time.time() - start_time:.2f} seconds.")
     
-    # Return an MMR retriever (2nd-stage reranking) with reasonable defaults.
-    # This improves precision by promoting diverse and relevant results.
+    # Create and return retriever with better search parameters
     retriever = vector_store.as_retriever(
         search_type="mmr", 
         search_kwargs={
-            "k": 8, 
-            "fetch_k": 30, 
-            "lambda_mult": 0.6,
-            "score_threshold": 0.8
+            "k": 6,
+            "fetch_k": 15,
         }
+        # search_type="similarity", 
+        # search_kwargs={
+        #     "k": 8, 
+        # }
     )
     return retriever
